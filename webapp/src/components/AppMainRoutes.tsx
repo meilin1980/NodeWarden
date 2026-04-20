@@ -74,6 +74,7 @@ export interface AppMainRoutesProps {
   onBulkMoveVaultItems: (ids: string[], folderId: string | null) => Promise<void>;
   onVerifyMasterPassword: (email: string, password: string) => Promise<void>;
   onCreateFolder: (name: string) => Promise<void>;
+  onRenameFolder: (folderId: string, name: string) => Promise<void>;
   onDeleteFolder: (folderId: string) => Promise<void>;
   onBulkDeleteFolders: (folderIds: string[]) => Promise<void>;
   onDownloadVaultAttachment: (cipher: Cipher, attachmentId: string) => Promise<void>;
@@ -94,6 +95,7 @@ export interface AppMainRoutesProps {
   onOpenDisableTotp: () => void;
   onGetRecoveryCode: (masterPassword: string) => Promise<string>;
   onRefreshAuthorizedDevices: () => Promise<void>;
+  onRenameAuthorizedDevice: (device: AuthorizedDevice, name: string) => Promise<void>;
   onRevokeDeviceTrust: (device: AuthorizedDevice) => void;
   onRemoveDevice: (device: AuthorizedDevice) => void;
   onRevokeAllDeviceTrust: () => void;
@@ -106,13 +108,16 @@ export interface AppMainRoutesProps {
   onRevokeInvite: (code: string) => Promise<void>;
   onExportBackup: (includeAttachments?: boolean) => Promise<void>;
   onImportBackup: (file: File, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
+  onImportBackupAllowingChecksumMismatch: (file: File, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
   onLoadBackupSettings: () => Promise<AdminBackupSettings>;
   onSaveBackupSettings: (settings: AdminBackupSettings) => Promise<AdminBackupSettings>;
   onRunRemoteBackup: (destinationId?: string | null) => Promise<AdminBackupRunResponse>;
   onListRemoteBackups: (destinationId: string, path: string) => Promise<RemoteBackupBrowserResponse>;
   onDownloadRemoteBackup: (destinationId: string, path: string, onProgress?: (percent: number | null) => void) => Promise<void>;
+  onInspectRemoteBackup: (destinationId: string, path: string) => Promise<{ object: 'backup-remote-integrity'; destinationId: string; path: string; fileName: string; integrity: { hasChecksumPrefix: boolean; expectedPrefix: string | null; actualPrefix: string; matches: boolean } }>;
   onDeleteRemoteBackup: (destinationId: string, path: string) => Promise<void>;
   onRestoreRemoteBackup: (destinationId: string, path: string, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
+  onRestoreRemoteBackupAllowingChecksumMismatch: (destinationId: string, path: string, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
 }
 
 export default function AppMainRoutes(props: AppMainRoutesProps) {
@@ -189,6 +194,7 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
             onVerifyMasterPassword={props.onVerifyMasterPassword}
             onNotify={props.onNotify}
             onCreateFolder={props.onCreateFolder}
+            onRenameFolder={props.onRenameFolder}
             onDeleteFolder={props.onDeleteFolder}
             onBulkDeleteFolders={props.onBulkDeleteFolders}
             onDownloadAttachment={props.onDownloadVaultAttachment}
@@ -276,6 +282,7 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
               devices={props.authorizedDevices}
               loading={props.authorizedDevicesLoading}
               onRefresh={() => void props.onRefreshAuthorizedDevices()}
+              onRenameDevice={props.onRenameAuthorizedDevice}
               onRevokeTrust={props.onRevokeDeviceTrust}
               onRemoveDevice={props.onRemoveDevice}
               onRevokeAll={props.onRevokeAllDeviceTrust}
@@ -333,11 +340,14 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
                 currentUserId={props.profile?.id || null}
                 onExport={props.onExportBackup}
                 onImport={props.onImportBackup}
+                onImportAllowingChecksumMismatch={props.onImportBackupAllowingChecksumMismatch}
                 onLoadSettings={props.onLoadBackupSettings}
                 onListRemoteBackups={props.onListRemoteBackups}
                 onDownloadRemoteBackup={props.onDownloadRemoteBackup}
+                onInspectRemoteBackup={props.onInspectRemoteBackup}
                 onDeleteRemoteBackup={props.onDeleteRemoteBackup}
                 onRestoreRemoteBackup={props.onRestoreRemoteBackup}
+                onRestoreRemoteBackupAllowingChecksumMismatch={props.onRestoreRemoteBackupAllowingChecksumMismatch}
                 onSaveSettings={props.onSaveBackupSettings}
                 onRunRemoteBackup={props.onRunRemoteBackup}
                 onNotify={props.onNotify}

@@ -25,13 +25,15 @@ interface AppAuthenticatedShellProps {
 }
 
 export default function AppAuthenticatedShell(props: AppAuthenticatedShellProps) {
+  const routeAnimationKey = props.isImportRoute ? props.importRoute : props.location;
+
   return (
     <div className="app-page">
       <div className="app-shell">
         <header className="topbar">
           <div className="brand">
             <img src="/logo-64.png" alt="NodeWarden logo" className="brand-logo" />
-            <span className="brand-name">NodeWarden</span>
+            <img src="/nodewarden-wordmark.svg" alt="NodeWarden" className="brand-wordmark" />
             <span className="mobile-page-title">{props.currentPageTitle}</span>
           </div>
           <div className="topbar-actions">
@@ -106,7 +108,9 @@ export default function AppAuthenticatedShell(props: AppAuthenticatedShellProps)
             </Link>
           </aside>
           <main className="content">
-            <AppMainRoutes {...props.mainRoutesProps} />
+            <div key={routeAnimationKey} className="route-stage">
+              <AppMainRoutes {...props.mainRoutesProps} />
+            </div>
           </main>
         </div>
 
