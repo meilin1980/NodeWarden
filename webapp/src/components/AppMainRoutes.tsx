@@ -9,9 +9,9 @@ import { t } from '@/lib/i18n';
 import type { AdminInvite, AdminUser, AuthorizedDevice, Cipher, Folder as VaultFolder, Profile, Send, SendDraft, SessionState, VaultDraft } from '@/lib/types';
 import type { ExportRequest } from '@/lib/export-formats';
 
+const VaultPage = lazy(() => import('@/components/VaultPage'));
 const SendsPage = lazy(() => import('@/components/SendsPage'));
 const TotpCodesPage = lazy(() => import('@/components/TotpCodesPage'));
-const VaultPage = lazy(() => import('@/components/VaultPage'));
 const SettingsPage = lazy(() => import('@/components/SettingsPage'));
 const SecurityDevicesPage = lazy(() => import('@/components/SecurityDevicesPage'));
 const AdminPage = lazy(() => import('@/components/AdminPage'));
@@ -33,6 +33,7 @@ export interface AppMainRoutesProps {
   profile: Profile | null;
   session: SessionState | null;
   mobileLayout: boolean;
+  mobileSidebarToggleKey: number;
   importRoute: string;
   settingsHomeRoute: string;
   settingsAccountRoute: string;
@@ -45,6 +46,8 @@ export interface AppMainRoutesProps {
   users: AdminUser[];
   invites: AdminInvite[];
   totpEnabled: boolean;
+  lockTimeoutMinutes: 0 | 1 | 5 | 15 | 30;
+  sessionTimeoutAction: 'lock' | 'logout';
   authorizedDevices: AuthorizedDevice[];
   authorizedDevicesLoading: boolean;
   onNavigate: (path: string) => void;
@@ -94,6 +97,10 @@ export interface AppMainRoutesProps {
   onEnableTotp: (secret: string, token: string) => Promise<void>;
   onOpenDisableTotp: () => void;
   onGetRecoveryCode: (masterPassword: string) => Promise<string>;
+  onGetApiKey: (masterPassword: string) => Promise<string>;
+  onRotateApiKey: (masterPassword: string) => Promise<string>;
+  onLockTimeoutChange: (minutes: 0 | 1 | 5 | 15 | 30) => void;
+  onSessionTimeoutActionChange: (action: 'lock' | 'logout') => void;
   onRefreshAuthorizedDevices: () => Promise<void>;
   onRenameAuthorizedDevice: (device: AuthorizedDevice, name: string) => Promise<void>;
   onRevokeDeviceTrust: (device: AuthorizedDevice) => void;
@@ -122,6 +129,7 @@ export interface AppMainRoutesProps {
 
 export default function AppMainRoutes(props: AppMainRoutesProps) {
   const importRoutePaths = [props.importRoute, '/tools/import', '/tools/import-export', '/tools/import-data', '/import', '/import-export'] as const;
+  const isAdmin = String(props.profile?.role || '').toLowerCase() === 'admin';
   const importPageContent = (
     <Suspense fallback={<RouteContentFallback />}>
       <ImportPage
@@ -163,6 +171,7 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
             onBulkDelete={props.onBulkDeleteSends}
             uploadingSendFileName={props.uploadingSendFileName}
             sendUploadPercent={props.sendUploadPercent}
+            mobileSidebarToggleKey={props.mobileSidebarToggleKey}
             onNotify={props.onNotify}
           />
         </Suspense>
@@ -202,6 +211,7 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
             attachmentDownloadPercent={props.attachmentDownloadPercent}
             uploadingAttachmentName={props.uploadingAttachmentName}
             attachmentUploadPercent={props.attachmentUploadPercent}
+            mobileSidebarToggleKey={props.mobileSidebarToggleKey}
           />
         </Suspense>
       </Route>
@@ -220,11 +230,17 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
               <SettingsPage
                 profile={props.profile}
                 totpEnabled={props.totpEnabled}
+                lockTimeoutMinutes={props.lockTimeoutMinutes}
+                sessionTimeoutAction={props.sessionTimeoutAction}
                 onChangePassword={props.onChangePassword}
                 onSavePasswordHint={props.onSavePasswordHint}
                 onEnableTotp={props.onEnableTotp}
                 onOpenDisableTotp={props.onOpenDisableTotp}
                 onGetRecoveryCode={props.onGetRecoveryCode}
+                onGetApiKey={props.onGetApiKey}
+                onRotateApiKey={props.onRotateApiKey}
+                onLockTimeoutChange={props.onLockTimeoutChange}
+                onSessionTimeoutActionChange={props.onSessionTimeoutActionChange}
                 onNotify={props.onNotify}
               />
             </Suspense>
@@ -247,13 +263,13 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
                 <ArrowUpDown size={18} />
                 <span>{t('nav_import_export')}</span>
               </Link>
-              {props.profile.role === 'admin' && (
+              {isAdmin && (
                 <Link href="/admin" className="mobile-settings-link">
                   <ShieldUser size={18} />
                   <span>{t('nav_admin_panel')}</span>
                 </Link>
               )}
-              {props.profile.role === 'admin' && (
+              {isAdmin && (
                 <Link href="/backup" className="mobile-settings-link">
                   <Cloud size={18} />
                   <span>{t('nav_backup_strategy')}</span>
@@ -325,7 +341,7 @@ export default function AppMainRoutes(props: AppMainRoutesProps) {
         <LegacyBackupRedirect onNavigate={props.onNavigate} />
       </Route>
       <Route path="/backup">
-        {props.profile?.role === 'admin' ? (
+        {isAdmin ? (
           <div className="stack">
             {props.mobileLayout && (
               <div className="mobile-settings-subhead">
