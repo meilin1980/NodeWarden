@@ -1,5 +1,5 @@
 import { bytesToBase64, decryptBw, encryptBw, hkdfExpand, pbkdf2 } from '../crypto';
-import { t } from '../i18n';
+import { t, translateServerError } from '../i18n';
 import type { AuthorizedDevice } from '../types';
 import type {
   Profile,
@@ -45,6 +45,8 @@ interface RefreshSuccess {
 }
 
 type RefreshResult = RefreshFailure | RefreshSuccess;
+
+const pendingRefreshes = new Map<string, Promise<RefreshResult>>();
 
 function randomHex(length: number): string {
   const bytes = crypto.getRandomValues(new Uint8Array(Math.max(1, Math.ceil(length / 2))));
@@ -295,12 +297,12 @@ export async function refreshAccessToken(session: SessionState): Promise<Refresh
       return {
         ok: false,
         transient: isTransientRefreshStatus(resp.status),
-        error: json?.error_description || json?.error || 'Session refresh failed',
+        error: translateServerError(json?.error_description || json?.error, t('txt_session_refresh_failed')),
       };
     }
     const json = await parseJson<TokenSuccess>(resp);
     if (!json?.access_token) {
-      return { ok: false, transient: false, error: 'Session refresh failed' };
+      return { ok: false, transient: false, error: t('txt_session_refresh_failed') };
     }
     return { ok: true, token: json };
   } catch (error) {
@@ -310,6 +312,25 @@ export async function refreshAccessToken(session: SessionState): Promise<Refresh
       error: error instanceof Error ? error.message : 'Network error',
     };
   }
+}
+
+function refreshKey(session: SessionState): string {
+  if (session.authMode === 'web-cookie') return `web-cookie:${session.email || ''}`;
+  return `token:${session.refreshToken || ''}`;
+}
+
+function refreshAccessTokenOnce(session: SessionState): Promise<RefreshResult> {
+  const key = refreshKey(session);
+  const existing = pendingRefreshes.get(key);
+  if (existing) return existing;
+
+  const request = refreshAccessToken(session).finally(() => {
+    if (pendingRefreshes.get(key) === request) {
+      pendingRefreshes.delete(key);
+    }
+  });
+  pendingRefreshes.set(key, request);
+  return request;
 }
 
 export async function revokeCurrentSession(session: SessionState | null): Promise<void> {
@@ -379,11 +400,11 @@ export async function registerAccount(args: {
 
     if (!resp.ok) {
       const json = await parseJson<TokenError>(resp);
-      return { ok: false, message: json?.error_description || json?.error || 'Register failed' };
+      return { ok: false, message: translateServerError(json?.error_description || json?.error, t('txt_register_failed')) };
     }
     return { ok: true };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : 'Register failed' };
+    return { ok: false, message: error instanceof Error ? translateServerError(error.message, error.message) : t('txt_register_failed') };
   }
 }
 
@@ -395,7 +416,7 @@ export async function getPasswordHint(email: string): Promise<{ masterPasswordHi
   });
   if (!resp.ok) {
     const body = await parseJson<TokenError>(resp);
-    throw new Error(body?.error_description || body?.error || 'Failed to load password hint');
+    throw new Error(translateServerError(body?.error_description || body?.error, t('txt_password_hint_load_failed')));
   }
   const body = (await parseJson<{ masterPasswordHint?: string | null }>(resp)) || {};
   return { masterPasswordHint: body.masterPasswordHint ?? null };
@@ -436,20 +457,29 @@ export function createAuthedFetch(getSession: () => SessionState | null, setSess
     let resp = await retryableRequest(headers);
     if (resp.status !== 401 || (!session.refreshToken && session.authMode !== 'web-cookie')) return resp;
 
-    const refreshed = await refreshAccessToken(session);
+    const latest = getSession();
+    if (latest?.accessToken && latest.accessToken !== session.accessToken) {
+      const latestHeaders = new Headers(init.headers || {});
+      latestHeaders.set('Authorization', `Bearer ${latest.accessToken}`);
+      resp = await retryableRequest(latestHeaders);
+      if (resp.status !== 401) return resp;
+    }
+
+    const refreshSource = latest || session;
+    const refreshed = await refreshAccessTokenOnce(refreshSource);
     if (!refreshed.ok) {
       if (refreshed.transient) {
-        throw new Error(refreshed.error || 'Session refresh temporarily unavailable');
+        throw new Error(refreshed.error || t('txt_session_refresh_failed'));
       }
       setSession(null);
-      throw new Error('Session expired');
+      throw new Error(t('txt_session_refresh_failed'));
     }
 
     const nextSession: SessionState = {
-      ...session,
+      ...refreshSource,
       accessToken: refreshed.token.access_token,
-      refreshToken: refreshed.token.refresh_token || session.refreshToken,
-      authMode: refreshed.token.web_session ? 'web-cookie' : (session.authMode || 'token'),
+      refreshToken: refreshed.token.refresh_token || refreshSource.refreshToken,
+      authMode: refreshed.token.web_session ? 'web-cookie' : (refreshSource.authMode || 'token'),
     };
     setSession(nextSession);
     saveSession(nextSession);
@@ -482,7 +512,7 @@ export async function updateProfile(
   });
   if (!resp.ok) {
     const body = await parseJson<TokenError>(resp);
-    throw new Error(body?.error_description || body?.error || 'Save profile failed');
+    throw new Error(translateServerError(body?.error_description || body?.error, t('txt_save_profile_failed')));
   }
   const body = await parseJson<Profile>(resp);
   if (!body) throw new Error('Invalid profile');
@@ -545,7 +575,7 @@ export async function setTotp(
   });
   if (!resp.ok) {
     const body = await parseJson<TokenError>(resp);
-    throw new Error(body?.error_description || body?.error || 'TOTP update failed');
+    throw new Error(translateServerError(body?.error_description || body?.error, t('txt_totp_update_failed')));
   }
 }
 
@@ -560,7 +590,7 @@ export async function verifyMasterPassword(
   });
   if (!resp.ok) {
     const body = await parseJson<TokenError>(resp);
-    throw new Error(body?.error_description || body?.error || 'Master password verify failed');
+    throw new Error(translateServerError(body?.error_description || body?.error, t('txt_master_password_verify_failed')));
   }
 }
 
@@ -595,7 +625,7 @@ export async function getTotpRecoveryCode(
   });
   if (!resp.ok) {
     const body = await parseJson<TokenError>(resp);
-    throw new Error(body?.error_description || body?.error || 'Failed to get recovery code');
+    throw new Error(translateServerError(body?.error_description || body?.error, t('txt_get_recovery_code_failed')));
   }
   const body = (await parseJson<{ code?: string }>(resp)) || {};
   return String(body.code || '');
@@ -617,7 +647,7 @@ export async function recoverTwoFactor(
   });
   if (!resp.ok) {
     const body = await parseJson<TokenError>(resp);
-    throw new Error(body?.error_description || body?.error || 'Recover 2FA failed');
+    throw new Error(translateServerError(body?.error_description || body?.error, t('txt_recover_2fa_failed')));
   }
   return (await parseJson<{ newRecoveryCode?: string }>(resp)) || {};
 }
@@ -635,6 +665,14 @@ export async function revokeAuthorizedDeviceTrust(
 ): Promise<void> {
   const resp = await authedFetch(`/api/devices/authorized/${encodeURIComponent(deviceIdentifier)}`, { method: 'DELETE' });
   if (!resp.ok) throw new Error(t('txt_revoke_device_trust_failed'));
+}
+
+export async function trustAuthorizedDevicePermanently(
+  authedFetch: AuthedFetch,
+  deviceIdentifier: string
+): Promise<void> {
+  const resp = await authedFetch(`/api/devices/authorized/${encodeURIComponent(deviceIdentifier)}/permanent`, { method: 'POST' });
+  if (!resp.ok) throw new Error(t('txt_trust_device_permanently_failed'));
 }
 
 export async function revokeAllAuthorizedDeviceTrust(authedFetch: AuthedFetch): Promise<void> {
@@ -678,7 +716,7 @@ export async function getApiKey(authedFetch: AuthedFetch, masterPasswordHash: st
   });
   if (!resp.ok) {
     const body = await parseJson<TokenError>(resp);
-    throw new Error(body?.error_description || body?.error || 'Failed to get API key');
+    throw new Error(translateServerError(body?.error_description || body?.error, t('txt_get_api_key_failed')));
   }
   const body = (await parseJson<{ apiKey?: string }>(resp)) || {};
   return String(body.apiKey || '');
@@ -692,7 +730,7 @@ export async function rotateApiKey(authedFetch: AuthedFetch, masterPasswordHash:
   });
   if (!resp.ok) {
     const body = await parseJson<TokenError>(resp);
-    throw new Error(body?.error_description || body?.error || 'Failed to rotate API key');
+    throw new Error(translateServerError(body?.error_description || body?.error, t('txt_rotate_api_key_failed')));
   }
   const body = (await parseJson<{ apiKey?: string }>(resp)) || {};
   return String(body.apiKey || '');

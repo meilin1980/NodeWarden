@@ -23,6 +23,22 @@ export interface VerifiedAccessContext {
   user: User;
 }
 
+export type RefreshAccessTokenFailureReason =
+  | 'token_not_found_or_expired'
+  | 'user_missing'
+  | 'user_inactive'
+  | 'device_missing'
+  | 'device_session_mismatch';
+
+export type RefreshAccessTokenResult =
+  | { ok: true; accessToken: string; user: User; device: { identifier: string; sessionStamp: string } | null }
+  | {
+      ok: false;
+      reason: RefreshAccessTokenFailureReason;
+      userId?: string | null;
+      deviceIdentifier?: string | null;
+    };
+
 export class AuthService {
   private storage: StorageService;
   private static userCache = new Map<string, CachedUserEntry>();
@@ -30,6 +46,25 @@ export class AuthService {
 
   constructor(private env: Env) {
     this.storage = new StorageService(env.DB);
+  }
+
+  static invalidateUserCache(userId: string): void {
+    const normalizedUserId = String(userId || '').trim();
+    if (!normalizedUserId) return;
+    AuthService.userCache.delete(normalizedUserId);
+    const prefix = `${normalizedUserId}:`;
+    for (const key of AuthService.deviceCache.keys()) {
+      if (key.startsWith(prefix)) {
+        AuthService.deviceCache.delete(key);
+      }
+    }
+  }
+
+  static invalidateDeviceCache(userId: string, deviceId: string): void {
+    const normalizedUserId = String(userId || '').trim();
+    const normalizedDeviceId = String(deviceId || '').trim();
+    if (!normalizedUserId || !normalizedDeviceId) return;
+    AuthService.deviceCache.delete(`${normalizedUserId}:${normalizedDeviceId}`);
   }
 
   private readCachedUser(userId: string): User | null | undefined {
@@ -57,6 +92,12 @@ export class AuthService {
     return user;
   }
 
+  private async getFreshUser(userId: string): Promise<User | null> {
+    const user = await this.storage.getUserById(userId);
+    this.writeCachedUser(userId, user);
+    return user;
+  }
+
   private readCachedDevice(userId: string, deviceId: string) {
     const cacheKey = `${userId}:${deviceId}`;
     const cached = AuthService.deviceCache.get(cacheKey);
@@ -79,6 +120,12 @@ export class AuthService {
   private async getCachedDevice(userId: string, deviceId: string) {
     const cached = this.readCachedDevice(userId, deviceId);
     if (cached !== undefined) return cached;
+    const device = await this.storage.getDevice(userId, deviceId);
+    this.writeCachedDevice(userId, deviceId, device);
+    return device;
+  }
+
+  private async getFreshDevice(userId: string, deviceId: string) {
     const device = await this.storage.getDevice(userId, deviceId);
     this.writeCachedDevice(userId, deviceId, device);
     return device;
@@ -162,7 +209,10 @@ export class AuthService {
     const payload = await verifyJWT(parts[1], this.env.JWT_SECRET);
     if (!payload) return null;
 
-    const user = await this.getCachedUser(payload.sub);
+    let user = await this.getCachedUser(payload.sub);
+    if (!user || user.status !== 'active' || payload.sstamp !== user.securityStamp) {
+      user = await this.getFreshUser(payload.sub);
+    }
     if (!user) return null;
     if (user.status !== 'active') return null;
 
@@ -171,7 +221,10 @@ export class AuthService {
     }
 
     if (payload.did) {
-      const device = await this.getCachedDevice(user.id, payload.did);
+      let device = await this.getCachedDevice(user.id, payload.did);
+      if (!device || !payload.dstamp || payload.dstamp !== device.sessionStamp) {
+        device = await this.getFreshDevice(user.id, payload.did);
+      }
       if (!device) return null;
       if (!payload.dstamp || payload.dstamp !== device.sessionStamp) return null;
     }
@@ -186,17 +239,18 @@ export class AuthService {
   }
 
   // Refresh access token
-  async refreshAccessToken(
-    refreshToken: string
-  ): Promise<{ accessToken: string; user: User; device: { identifier: string; sessionStamp: string } | null } | null> {
+  async refreshAccessTokenDetailed(refreshToken: string): Promise<RefreshAccessTokenResult> {
     const record = await this.storage.getRefreshTokenRecord(refreshToken);
-    if (!record?.userId) return null;
+    if (!record?.userId) return { ok: false, reason: 'token_not_found_or_expired' };
 
     const user = await this.storage.getUserById(record.userId);
-    if (!user) return null;
+    if (!user) {
+      await this.storage.deleteRefreshToken(refreshToken);
+      return { ok: false, reason: 'user_missing', userId: record.userId, deviceIdentifier: record.deviceIdentifier };
+    }
     if (user.status !== 'active') {
       await this.storage.deleteRefreshToken(refreshToken);
-      return null;
+      return { ok: false, reason: 'user_inactive', userId: user.id, deviceIdentifier: record.deviceIdentifier };
     }
 
     let device: { identifier: string; sessionStamp: string } | null = null;
@@ -204,16 +258,23 @@ export class AuthService {
       const boundDevice = await this.storage.getDevice(user.id, record.deviceIdentifier);
       if (!boundDevice) {
         await this.storage.deleteRefreshToken(refreshToken);
-        return null;
+        return { ok: false, reason: 'device_missing', userId: user.id, deviceIdentifier: record.deviceIdentifier };
       }
       if (!record.deviceSessionStamp || boundDevice.sessionStamp !== record.deviceSessionStamp) {
         await this.storage.deleteRefreshToken(refreshToken);
-        return null;
+        return { ok: false, reason: 'device_session_mismatch', userId: user.id, deviceIdentifier: record.deviceIdentifier };
       }
       device = { identifier: boundDevice.deviceIdentifier, sessionStamp: boundDevice.sessionStamp };
     }
 
     const accessToken = await this.generateAccessToken(user, device);
-    return { accessToken, user, device };
+    return { ok: true, accessToken, user, device };
+  }
+
+  async refreshAccessToken(
+    refreshToken: string
+  ): Promise<{ accessToken: string; user: User; device: { identifier: string; sessionStamp: string } | null } | null> {
+    const result = await this.refreshAccessTokenDetailed(refreshToken);
+    return result.ok ? result : null;
   }
 }

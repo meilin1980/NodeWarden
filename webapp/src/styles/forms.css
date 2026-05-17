@@ -74,19 +74,43 @@ input[type='file'].input::file-selector-button:hover {
   @apply pr-11;
 }
 
+.input-action-wrap {
+  @apply relative;
+}
+
+.input-action-wrap .input {
+  @apply pr-12;
+}
+
+.input-icon-btn {
+  @apply absolute right-2 top-1/2 grid h-8 w-8 cursor-pointer place-items-center rounded-full border-0 bg-transparent text-slate-700 transition;
+  transform: translateY(-50%);
+}
+
+.input-icon-btn:hover:not(:disabled) {
+  color: var(--primary);
+  background: rgba(37, 99, 235, 0.08);
+  transform: translateY(-50%) scale(1.04);
+}
+
+.input-icon-btn:disabled {
+  @apply cursor-not-allowed text-slate-400;
+}
+
 .password-toggle {
   @apply absolute right-2 top-1/2 grid cursor-pointer place-items-center border-0 bg-transparent text-blue-700 transition;
   transform: translateY(-50%);
 }
 
 .eye-btn {
-  @apply absolute bottom-2.5 right-2.5 grid h-8 w-8 cursor-pointer place-items-center border-0 bg-transparent text-slate-700 transition;
+  @apply absolute right-2.5 top-1/2 grid h-8 w-8 cursor-pointer place-items-center border-0 bg-transparent text-slate-700 transition;
+  transform: translateY(-50%);
 }
 
 .password-toggle:hover,
 .eye-btn:hover {
   color: var(--primary);
-  transform: translateY(-1px) scale(1.04);
+  transform: translateY(-50%) scale(1.04);
 }
 
 .btn {
@@ -175,7 +199,7 @@ input[type='file'].input::file-selector-button:hover {
 }
 
 .or {
-  @apply my-2.5 text-center text-slate-700;
+  @apply text-center text-slate-700;
 }
 
 .field-help {

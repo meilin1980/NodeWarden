@@ -9,6 +9,7 @@ import {
   MOBILE_LAYOUT_QUERY,
   VAULT_LIST_OVERSCAN,
   VAULT_LIST_ROW_HEIGHT,
+  cardListSubtitle,
   FOLDER_SORT_STORAGE_KEY,
   VAULT_SORT_STORAGE_KEY,
   cipherTypeKey,
@@ -36,6 +37,7 @@ interface VaultPageProps {
   ciphers: Cipher[];
   folders: Folder[];
   loading: boolean;
+  error: string;
   emailForReprompt: string;
   onRefresh: () => Promise<void>;
   onCreate: (draft: VaultDraft, attachments?: File[]) => Promise<void>;
@@ -43,6 +45,7 @@ interface VaultPageProps {
   onDelete: (cipher: Cipher) => Promise<void>;
   onArchive: (cipher: Cipher) => Promise<void>;
   onUnarchive: (cipher: Cipher) => Promise<void>;
+  onRestore: (ids: string[]) => Promise<void>;
   onBulkDelete: (ids: string[]) => Promise<void>;
   onBulkPermanentDelete: (ids: string[]) => Promise<void>;
   onBulkRestore: (ids: string[]) => Promise<void>;
@@ -262,6 +265,8 @@ export default function VaultPage(props: VaultPageProps) {
     setRepromptApprovedCipherId(null);
     setRepromptPassword('');
     setRepromptOpen(false);
+    setShowPassword(false);
+    setHiddenFieldVisibleMap({});
   }, [selectedCipherId]);
 
   useEffect(() => {
@@ -301,9 +306,10 @@ export default function VaultPage(props: VaultPageProps) {
       const name = String(cipher.decName || cipher.name || '');
       const username = String(cipher.login?.decUsername || '');
       const uri = firstCipherUri(cipher);
+      const cipherId = String(cipher.id || '').trim();
       meta.set(cipher.id, {
         name,
-        searchText: `${name}\n${username}\n${uri}`.toLowerCase(),
+        searchText: `${cipherId}\n${cipherId.replace(/-/g, '')}\n${name}\n${username}\n${uri}`.toLowerCase(),
         firstUri: uri,
         typeKey: cipherTypeKey(Number(cipher.type || 1)),
         sortTime: sortTimeValue(cipher),
@@ -498,6 +504,9 @@ const folderName = useCallback((id: string | null | undefined): string => {
     if (Number(cipher.type || 1) === 1) {
       return cipher.login?.decUsername || cipherMetaById.get(cipher.id)?.firstUri || '';
     }
+    if (Number(cipher.type || 1) === 3) {
+      return cardListSubtitle(cipher);
+    }
     return cipherTypeLabel(Number(cipher.type || 1));
   }, [cipherMetaById]);
 
@@ -515,6 +524,7 @@ const folderName = useCallback((id: string | null | undefined): string => {
     setCreateMenuOpen(false);
     setSelectedCipherId('');
     setShowPassword(false);
+    setHiddenFieldVisibleMap({});
     setLocalError('');
     setAttachmentQueue([]);
     setRemovedAttachmentIds({});
@@ -529,6 +539,7 @@ const folderName = useCallback((id: string | null | undefined): string => {
     setIsCreating(false);
     setIsEditing(true);
     setShowPassword(false);
+    setHiddenFieldVisibleMap({});
     setLocalError('');
     setAttachmentQueue([]);
     setRemovedAttachmentIds({});
@@ -541,6 +552,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
     setDraft(null);
     setIsEditing(false);
     setIsCreating(false);
+    setShowPassword(false);
+    setHiddenFieldVisibleMap({});
     setLocalError('');
     setAttachmentQueue([]);
     setRemovedAttachmentIds({});
@@ -716,6 +729,18 @@ const folderName = useCallback((id: string | null | undefined): string => {
       setPendingDelete(null);
       cancelEdit();
       if (isMobileLayout) setMobilePanel('list');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRestoreSelected(cipher: Cipher): Promise<void> {
+    setBusy(true);
+    try {
+      await props.onRestore([cipher.id]);
+      if (isMobileLayout && selectedCipherId === cipher.id) {
+        setMobilePanel('list');
+      }
     } finally {
       setBusy(false);
     }
@@ -970,6 +995,8 @@ const folderName = useCallback((id: string | null | undefined): string => {
     }
     setSelectedCipherId(cipherId);
     setRepromptApprovedCipherId(null);
+    setShowPassword(false);
+    setHiddenFieldVisibleMap({});
     if (isMobileLayout) setMobilePanel('detail');
     setMobileSidebarOpen(false);
   }, [isEditing, isCreating, cancelEdit, isMobileLayout]);
@@ -1021,6 +1048,7 @@ const folderName = useCallback((id: string | null | undefined): string => {
         <VaultListPanel
           busy={busy}
           loading={props.loading}
+          error={props.error}
           searchInput={searchInput}
           sortMode={sortMode}
           sortMenuOpen={sortMenuOpen}
@@ -1134,13 +1162,27 @@ const folderName = useCallback((id: string | null | undefined): string => {
                 attachmentDownloadPercent={props.attachmentDownloadPercent}
                 onStartEdit={startEdit}
                 onDelete={setPendingDelete}
+                onRestore={(cipher) => void handleRestoreSelected(cipher)}
                 onArchive={(cipher) => setPendingArchive(cipher)}
                 onUnarchive={(cipher) => void handleUnarchiveSelected(cipher)}
               />
             </div>
           )}
 
-          {!isEditing && !selectedCipher && (props.loading ? <LoadingState card lines={5} /> : <div className="empty card">{t('txt_select_an_item')}</div>)}
+          {!isEditing && !selectedCipher && (
+            props.loading
+              ? <LoadingState card lines={5} />
+              : props.error
+                ? (
+                  <div className="empty card vault-error-state">
+                    <strong>{props.error}</strong>
+                    <button type="button" className="btn btn-secondary small" disabled={busy} onClick={handleSyncVault}>
+                      {t('txt_retry_sync')}
+                    </button>
+                  </div>
+                )
+                : <div className="empty card">{t('txt_select_an_item')}</div>
+          )}
         </section>
       </div>
 

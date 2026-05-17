@@ -1,9 +1,18 @@
+// CONTRACT:
+// Locale bundles are standalone and loaded on demand. Adding a locale requires
+// updating Locale, AVAILABLE_LOCALES, browser-language detection, localeLoaders,
+// scripts/i18n-utils.cjs, and the locale file itself.
+//
+// Do not call t() at module scope for exported arrays/constants; async init can
+// otherwise leave raw txt_* keys in the rendered UI.
 export type Locale =
   | 'en'
   | 'zh-CN'
   | 'zh-TW'
   | 'ru'
   | 'es';
+
+import enMessages from './i18n/locales/en';
 
 const LOCALE_STORAGE_KEY = 'nodewarden.locale';
 
@@ -18,8 +27,8 @@ export const AVAILABLE_LOCALES: readonly { value: Locale; label: string }[] = [
 ];
 
 let locale: Locale = resolveInitialLocale();
-let activeMessages: MessageTable = {};
-const loadedMessages = new Map<Locale, MessageTable>();
+let activeMessages: MessageTable = enMessages;
+const loadedMessages = new Map<Locale, MessageTable>([['en', enMessages]]);
 
 function isLocale(value: unknown): value is Locale {
   return AVAILABLE_LOCALES.some((item) => item.value === value);
@@ -46,7 +55,7 @@ function resolveInitialLocale(): Locale {
 }
 
 const localeLoaders: Record<Locale, () => Promise<{ default: MessageTable }>> = {
-  en: () => import('./i18n/locales/en'),
+  en: () => Promise.resolve({ default: enMessages }),
   'zh-CN': () => import('./i18n/locales/zh-CN'),
   'zh-TW': () => import('./i18n/locales/zh-TW'),
   ru: () => import('./i18n/locales/ru'),
@@ -63,11 +72,7 @@ async function loadLocaleMessages(next: Locale): Promise<MessageTable> {
 }
 
 async function loadFallbackMessages(): Promise<MessageTable> {
-  const cached = loadedMessages.get('en');
-  if (cached) return cached;
-  const mod = await import('./i18n/locales/en');
-  loadedMessages.set('en', mod.default);
-  return mod.default;
+  return enMessages;
 }
 
 export type I18nParams = Record<string, string | number | null | undefined>;
@@ -86,6 +91,41 @@ export function t(key: string, params?: I18nParams): string {
   const template = activeMessages[key] ?? key;
   if (!params) return template;
   return template.replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? ''));
+}
+
+export function translateServerError(message: string | null | undefined, fallback: string): string {
+  const normalized = String(message || '').trim();
+  if (!normalized) return fallback;
+
+  const rateLimitMatch = normalized.match(/^Rate limit exceeded\. Try again in (\d+) seconds\.$/i);
+  if (rateLimitMatch) {
+    return t('txt_rate_limit_try_again_seconds', { seconds: rateLimitMatch[1] });
+  }
+
+  const key = {
+    'Account is disabled': 'txt_server_error_account_disabled',
+    'Client IP is required': 'txt_server_error_client_ip_required',
+    'ClientId or clientSecret is incorrect. Try again': 'txt_server_error_client_credentials_incorrect',
+    'Email already registered': 'txt_server_error_email_already_registered',
+    'Email and password are required': 'txt_server_error_email_password_required',
+    'Email is required': 'txt_server_error_email_required',
+    'Invite code is invalid or expired': 'txt_server_error_invite_invalid_or_expired',
+    'Invite code is required': 'txt_server_error_invite_required',
+    'Invalid refresh token': 'txt_server_error_invalid_refresh_token',
+    'Invalid request payload': 'txt_server_error_invalid_request_payload',
+    'JWT_SECRET is not set': 'txt_server_error_jwt_secret_missing',
+    'JWT_SECRET is using the default/sample value. Please change it.': 'txt_server_error_jwt_secret_default',
+    'JWT_SECRET must be at least 32 characters': 'txt_server_error_jwt_secret_too_short',
+    'Parameter error': 'txt_server_error_parameter_error',
+    'Refresh token is required': 'txt_server_error_refresh_token_required',
+    'Registration is temporarily unavailable, retry once': 'txt_server_error_registration_retry',
+    'TOTP token is required': 'txt_server_error_totp_token_required',
+    'Two factor required.': 'txt_server_error_two_factor_required',
+    'Two-step token is invalid. Try again.': 'txt_server_error_two_factor_invalid',
+    'Username or password is incorrect. Try again': 'txt_server_error_username_password_incorrect',
+  }[normalized];
+
+  return key ? t(key) : normalized;
 }
 
 export function getLocale(): Locale {
