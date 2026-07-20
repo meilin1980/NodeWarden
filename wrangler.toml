@@ -1,4 +1,4 @@
-name = "nodewarden-cf"
+name = "nodewarden-herbert"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 
